@@ -7,22 +7,28 @@ on:
 permissions:
   contents: read
 
-# One-time setup (npm cannot use OIDC for a package's very first publish):
-#   1. Publish the first version manually with 2FA:
-#        npm login && npm publish --access public
-#   2. On npmjs.com → package → Settings → Trusted publishing → GitHub Actions:
-#        Repository: niuma996/pi-harness
-#        Workflow:   release.yml
-#        Environment: (leave empty)
-#   3. A new trusted-publisher connection expires if its first publish does not
-#      succeed within two days; cut the next tag promptly.
-# Provenance is generated only when the repository and package are public.
+# One-time setup:
+#   1. Create an npm granular access token (Automation type) with read/write
+#      access on the @taco-ai org.
+#   2. Add it as the repository secret NPM_TOKEN (Settings → Secrets and
+#      variables → Actions → New repository secret).
+#   3. Bump `version` in package.json, commit, then push a matching vX.Y.Z tag.
+#
+# `--provenance` is deliberately omitted: npm's registry validates the sigstore
+# bundle against the source repository's visibility and rejects private repos
+# with E422 ("Unsupported GitHub Actions source repository visibility:
+# 'private'"). Re-add the flag once the repository goes public.
+#
+# Trusted publishing (OIDC) is the follow-on: npm cannot pre-configure a
+# trusted publisher for a package that does not exist yet, so the token above is
+# what publishes the first version. Once the package exists, replace it with
+# trusted publishing on npmjs.com (Settings → Trusted publishing).
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
-      id-token: write # npm trusted publishing (OIDC)
+      id-token: write # required for provenance once the repo goes public
     steps:
       - uses: actions/checkout@v7
 
@@ -32,10 +38,7 @@ jobs:
         with:
           node-version: 24.x
           cache: pnpm
-
-      # Trusted publishing needs npm >= 11.5.1. Do not set registry-url or
-      # NODE_AUTH_TOKEN here — either would defeat the OIDC exchange.
-      - run: npm install --global npm@11
+          registry-url: "https://registry.npmjs.org"
 
       - run: pnpm install --frozen-lockfile
 
@@ -62,7 +65,9 @@ jobs:
       - run: pnpm test
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Create GitHub release
         env:
