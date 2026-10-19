@@ -1,0 +1,4 @@
+# Neither package needs its install script for anything this package uses.
+allowBuilds:
+  '@google/genai': false
+  protobufjs: false

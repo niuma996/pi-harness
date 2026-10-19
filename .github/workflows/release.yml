@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# One-time setup (npm cannot use OIDC for a package's very first publish):
+#   1. Publish the first version manually with 2FA:
+#        npm login && npm publish --access public
+#   2. On npmjs.com → package → Settings → Trusted publishing → GitHub Actions:
+#        Repository: niuma996/pi-harness
+#        Workflow:   release.yml
+#        Environment: (leave empty)
+#   3. A new trusted-publisher connection expires if its first publish does not
+#      succeed within two days; cut the next tag promptly.
+# Provenance is generated only when the repository and package are public.
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # npm trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      # Trusted publishing needs npm >= 11.5.1. Do not set registry-url or
+      # NODE_AUTH_TOKEN here — either would defeat the OIDC exchange.
+      - run: npm install --global npm@11
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json
+        run: |
+          node -e '
+            const { version } = require("./package.json");
+            const tag = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            if (version !== tag) {
+              console.error(
+                `Tag ${process.env.GITHUB_REF_NAME} does not match package.json version ${version}`,
+              );
+              process.exit(1);
+            }
+            console.log(`Releasing ${version}`);
+          '
+
+      - run: pnpm docs:telemetry:check
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm test
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"

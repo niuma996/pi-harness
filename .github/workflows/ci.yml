@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.19.0", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm docs:telemetry:check
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm test
+
+      - name: Verify published package contents
+        run: |
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const [pack] = JSON.parse(
+              execFileSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" }),
+            );
+            const files = new Set(pack.files.map((file) => file.path));
+            const required = [
+              "docs/telemetry-schema.md",
+              "LICENSE",
+              "LICENSE.upstream",
+              "README.md",
+              "README.zh-CN.md",
+            ];
+            for (const path of required) {
+              if (!files.has(path)) {
+                console.error(`Package is missing ${path}`);
+                process.exit(1);
+              }
+            }
+            console.log(`Package contents verified (${files.size} files).`);
+          '

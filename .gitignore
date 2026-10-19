@@ -1,0 +1,40 @@
+# ---- 依赖 ----
+node_modules/
+.pnp
+.pnp.js
+
+# ---- 构建产物 ----
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# ---- 打包产物 ----
+*.tgz
+*.tar.gz
+
+# ---- 测试与覆盖率 ----
+coverage/
+.nyc_output/
+.vitest/
+
+# ---- 缓存 ----
+.cache/
+.turbo/
+.eslintcache
+
+# ---- 环境变量与本地密钥 ----
+.env
+.env.*
+!.env.example
+
+# ---- 编辑器与 IDE ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ---- 本机私有工作笔记（不提交）----
+.local-docs/
