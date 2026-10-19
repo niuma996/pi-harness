@@ -1,6 +1,14 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      # When false, runs every check but stops before publishing, so this
+      # workflow can be used as a dry run. Tag pushes always publish.
+      run_publish:
+        description: "Publish to npm after all checks pass"
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -9,10 +17,14 @@ permissions:
 
 # One-time setup:
 #   1. Create an npm granular access token (Automation type) with read/write
-#      access on the @taco-ai org.
+#      access on the @taco-ai org, and enable "Bypass 2FA" — without it npm
+#      answers EOTP and refuses to publish from a non-interactive runner.
 #   2. Add it as the repository secret NPM_TOKEN (Settings → Secrets and
 #      variables → Actions → New repository secret).
 #   3. Bump `version` in package.json, commit, then push a matching vX.Y.Z tag.
+#
+# A failed publish is retried by re-running this workflow with run_publish=true
+# rather than by re-tagging, so a published version is never re-tagged.
 #
 # `--provenance` is deliberately omitted: npm's registry validates the sigstore
 # bundle against the source repository's visibility and rejects private repos
@@ -43,6 +55,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Verify tag matches package.json
+        if: github.event_name == 'push'
         run: |
           node -e '
             const { version } = require("./package.json");
@@ -65,11 +78,13 @@ jobs:
       - run: pnpm test
 
       - name: Publish to npm
+        if: github.event_name == 'push' || inputs.run_publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
       - name: Create GitHub release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
