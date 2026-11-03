@@ -26,21 +26,21 @@ permissions:
 # A failed publish is retried by re-running this workflow with run_publish=true
 # rather than by re-tagging, so a published version is never re-tagged.
 #
-# `--provenance` is deliberately omitted: npm's registry validates the sigstore
-# bundle against the source repository's visibility and rejects private repos
-# with E422 ("Unsupported GitHub Actions source repository visibility:
-# 'private'"). Re-add the flag once the repository goes public.
+# `--provenance` requires a public source repository: npm's registry validates
+# the sigstore bundle against the source repository's visibility and rejects
+# private repos with E422 ("Unsupported GitHub Actions source repository
+# visibility: 'private'").
 #
-# Trusted publishing (OIDC) is the follow-on: npm cannot pre-configure a
-# trusted publisher for a package that does not exist yet, so the token above is
-# what publishes the first version. Once the package exists, replace it with
-# trusted publishing on npmjs.com (Settings → Trusted publishing).
+# Trusted publishing (OIDC) is the follow-on: the package now exists on npm,
+# so it can be configured as a trusted publisher. Replace the token above with
+# trusted publishing on npmjs.com (Settings → Trusted publishing) and drop
+# NPM_TOKEN.
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
-      id-token: write # required for provenance once the repo goes public
+      id-token: write # required for npm provenance
     steps:
       - uses: actions/checkout@v7
 
@@ -81,7 +81,7 @@ jobs:
         if: github.event_name == 'push' || inputs.run_publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --access public --provenance
 
       - name: Create GitHub release
         if: github.event_name == 'push'
