@@ -10,6 +10,7 @@ import {
 
 import type { AgentMessage } from "../../types.ts";
 import type { Context } from "../context.ts";
+import { withModelTelemetry } from "../execution/model-telemetry.ts";
 import { convertToLlm, createBranchSummaryMessage, createCompactionSummaryMessage } from "../messages.ts";
 import type { Branch, Entry, Session } from "../session/index.ts";
 import { BranchSummaryError, err, ok, type Result } from "../types.ts";
@@ -269,10 +270,12 @@ export async function generateBranchSummaryWithRequest(
 			timestamp: Date.now(),
 		},
 	];
-	const response = await request(
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		createSummaryRequestOptions({ maxTokens: 2048 }, context),
-		context,
+	const response = await withModelTelemetry(context, (requestContext) =>
+		request(
+			{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+			createSummaryRequestOptions({ maxTokens: 2048 }, requestContext),
+			requestContext,
+		),
 	);
 	if (response.stopReason === "aborted") {
 		return err(new BranchSummaryError("aborted", response.errorMessage || "Branch summary aborted"));

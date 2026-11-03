@@ -92,11 +92,18 @@ pi 基础包是 **peer** 依赖，固定在最新版本线上：
 
 ```jsonc
 "peerDependencies": {
-  "@earendil-works/pi-ai": "^1.3.0",
-  "@earendil-works/chord": "^1.3.0",
-  "@earendil-works/pi-telemetry": "^1.3.0"
+  "@earendil-works/pi-ai": "^1.5.0",
+  "@earendil-works/chord": "^1.5.0",
+  "@earendil-works/pi-telemetry": "^1.5.0"
 }
 ```
+
+0.1.1 版本要求 pi-ai、chord 和 pi-telemetry 至少为 1.5，请同步升级三个 peer。
+`withTelemetryContext()` 继续接受 recorder 或活动 span；活动 span 可与 chord 的
+`withTelemetry()` 互通。使用 recorder 发起模型调用时，会创建覆盖响应消费阶段的
+`pi.harness.model_request` 父 span。自实现 chord `Context` 的调用方需提供 `telemetry` 属性。
+实验性 pico3 的持久化 system message 工具参数必须为 JSON 对象；`Stored<T>` 仍使用 chord
+原有的 `JsonRepresentation<T>` 投影。已有 JSONL 文件无需迁移。
 
 刻意**不**依赖 `@earendil-works/pi-agent-core`（任何版本都不依赖 —— 1.x 已无 harness），
 也**不**依赖 `@earendil-works/pi-durable`（那是另一条迁移路线）。

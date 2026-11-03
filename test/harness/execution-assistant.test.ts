@@ -182,9 +182,13 @@ describe("streamHarnessAssistant", () => {
 			cacheRetention: "long",
 			deferred: { window: "1h" },
 			reasoning: "high",
-			signal: controller.signal,
-			telemetryContext: NOOP_TELEMETRY_CONTEXT,
+			telemetry: NOOP_TELEMETRY_CONTEXT,
 		});
+		expect(receivedOptions?.signal?.aborted).toBe(false);
+		const cancellation = new Error("caller cancelled");
+		controller.abort(cancellation);
+		expect(receivedOptions?.signal?.aborted).toBe(true);
+		expect(receivedOptions?.signal?.reason).toBe(cancellation);
 		expect(responseMetadata).toEqual({ status: 201, headers: { "request-id": "r1" } });
 		expect(starts).toHaveLength(1);
 		expect(startEventType).toBe("start");

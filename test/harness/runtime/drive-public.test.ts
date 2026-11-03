@@ -8,7 +8,8 @@ import {
 	type OperationAdmission,
 	type Resources,
 } from "../../../src/harness/agent-harness.ts";
-import { BACKGROUND_CONTEXT, withCancel } from "../../../src/harness/context.ts";
+import { BACKGROUND_CONTEXT, withCancel, withTelemetryContext } from "../../../src/harness/context.ts";
+import { InMemoryTelemetryContext } from "@earendil-works/pi-telemetry";
 import { Lane } from "../../../src/harness/runtime/lane.ts";
 import { MemoryStorage } from "../../../src/harness/session/memory.ts";
 import { StorageBackedSession } from "../../../src/harness/session/session.ts";
@@ -327,6 +328,37 @@ describe("runtime public drive", () => {
 			ok: false,
 			error: { _tag: "NothingToResume" },
 		});
+	});
+
+	it("records model telemetry when resuming a deferred run with a recorder", async () => {
+		const { lane, faux } = await createFixture({ deferred: true });
+		const recorder = new InMemoryTelemetryContext();
+		const context = withTelemetryContext(recorder, BACKGROUND_CONTEXT);
+		faux.setResponses([fauxAssistantMessage("answer")]);
+		const suspended = await lane.prompt("defer", undefined, context);
+		if (!suspended.ok || suspended.value.status !== "suspended") throw new Error("Expected suspension");
+		expect(await lane.resume(context)).toMatchObject({ ok: true, value: { status: "completed" } });
+		expect(recorder.getSpans().some((span) => span.name === "pi.ai.poll")).toBe(true);
+		expect(recorder.getSpans().every((span) => span.settled)).toBe(true);
+	});
+
+	it("passes a real telemetry span to deferred cancellation", async () => {
+		const { lane, faux } = await createFixture({ deferred: true });
+		const recorder = new InMemoryTelemetryContext();
+		const context = withTelemetryContext(recorder, BACKGROUND_CONTEXT);
+		const cancel = faux.provider.cancelDeferred!.bind(faux.provider);
+		let recorded = false;
+		faux.provider.cancelDeferred = async (model, handle, options) => {
+			options?.telemetry?.addEvent("cancel");
+			recorded = options?.telemetry !== undefined;
+			await cancel(model, handle, options);
+		};
+		faux.setResponses([fauxAssistantMessage("answer")]);
+		await lane.prompt("defer", undefined, context);
+		await lane.abort(context);
+		expect(recorded).toBe(true);
+		expect(faux.state.cancelledDeferred).toHaveLength(1);
+		expect(recorder.getSpans().every((span) => span.settled)).toBe(true);
 	});
 
 	it("aborts and reconciles the current operation", async () => {

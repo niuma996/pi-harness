@@ -233,6 +233,13 @@ const operationErrorAttributes = {
 export const HARNESS_TELEMETRY_SCHEMA = {
 	version: 1,
 	spans: {
+		"pi.harness.model_request": {
+			description: "Scoped model-request parent when the caller supplies a recorder instead of an active span",
+			parents: { kind: "root_or_external" },
+			startAttributes: {},
+			endAttributes: {},
+			status: { default: "ok", errorWhen: "The request boundary throws" },
+		},
 		"pi.harness.run": {
 			description: "One admitted in-process run invocation",
 			parents: { kind: "root_or_external" },

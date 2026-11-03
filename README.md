@@ -95,9 +95,9 @@ The pi base packages are **peer** dependencies, pinned to the latest line:
 
 ```jsonc
 "peerDependencies": {
-  "@earendil-works/pi-ai": "^1.3.0",
-  "@earendil-works/chord": "^1.3.0",
-  "@earendil-works/pi-telemetry": "^1.3.0"
+  "@earendil-works/pi-ai": "^1.5.0",
+  "@earendil-works/chord": "^1.5.0",
+  "@earendil-works/pi-telemetry": "^1.5.0"
 }
 ```
 
@@ -106,6 +106,14 @@ has no harness) and none on `@earendil-works/pi-durable` (a separate migration t
 
 What is frozen here is the **harness/session API and the JSONL format**. The **model stack
 tracks upstream**, so new models, auth fixes and provider fixes arrive by bumping the peers.
+
+Version 0.1.1 requires pi-ai, chord and pi-telemetry 1.5 or later. Upgrade all three peers together.
+`withTelemetryContext()` still accepts a recorder or an active span. Active spans interoperate
+with chord's `withTelemetry()`; recorder-backed model calls create a scoped
+`pi.harness.model_request` parent that remains open through response consumption.
+Custom implementations of chord `Context` must now expose `telemetry`. In experimental pico3,
+persisted system-message tool parameters must be JSON objects; `Stored<T>` still uses chord's
+`JsonRepresentation<T>` without redefining its projection rules. Existing JSONL files need no migration.
 
 ## Vendored shims
 

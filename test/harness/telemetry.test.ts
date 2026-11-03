@@ -22,6 +22,7 @@ describe("agent telemetry schemas", () => {
 		expect(() => JSON.stringify(HARNESS_TELEMETRY_SCHEMA)).not.toThrow();
 		expect(AGENT_TELEMETRY_SCHEMAS).toEqual([AI_TELEMETRY_SCHEMA, HARNESS_TELEMETRY_SCHEMA]);
 		expect(Object.keys(HARNESS_TELEMETRY_SCHEMA.spans)).toEqual([
+			"pi.harness.model_request",
 			"pi.harness.run",
 			"pi.harness.compaction",
 			"pi.harness.navigation",

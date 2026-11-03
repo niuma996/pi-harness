@@ -383,7 +383,7 @@ describe("runtime deferred polling", () => {
 		expect(driveOptions).toEqual({ operationId, pollDeferred: true });
 		expect(hookOptions).toMatchObject({ deferred: false });
 		expect(fetchOptions).toMatchObject({ wait: 0 });
-		expect(fetchOptions?.signal).toBe(drive.gate.signal);
+		expect(fetchOptions?.signal?.aborted).toBe(false);
 		expect(currentDeferred(fixture)).toMatchObject({ at: "deferred.suspended", poll: 1 });
 		expect(fixture.faux.state.deferredFetchCount).toBe(1);
 		expect(fixture.events.slice(-2).map((event) => event.type)).toEqual(["turn_end", "run_suspend"]);
@@ -394,6 +394,10 @@ describe("runtime deferred polling", () => {
 		});
 		expect(fixture.faux.state.deferredFetchCount).toBe(1);
 		await expectProjectionRestores(fixture);
+		drive.beginAbort(Promise.resolve());
+		drive.signalAbort();
+		expect(fetchOptions?.signal?.aborted).toBe(true);
+		expect(fetchOptions?.signal?.reason).toBe(drive.gate.signal.reason);
 	});
 
 	it("declines poll intent when cancellation wins preparation", async () => {

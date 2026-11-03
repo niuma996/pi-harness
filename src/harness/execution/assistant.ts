@@ -10,10 +10,11 @@ import type {
 	Tool,
 } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
-import { type Context, getTelemetryContext } from "../context.ts";
+import { type Context, withAbortSignal } from "../context.ts";
 import type { SettledAssistantMessage } from "../session/types.ts";
 import type { AgentHarnessStreamOptions } from "../types.ts";
 import { AbortRequested } from "./effect-gate.ts";
+import { withModelTelemetry } from "./model-telemetry.ts";
 
 /** HTTP response metadata captured before the provider response body is consumed. */
 export interface AssistantResponseMetadata {
@@ -79,7 +80,7 @@ function createRequestOptions(
 		deferred: options.deferred,
 		...(config.thinkingLevel === "off" ? {} : { reasoning: config.thinkingLevel }),
 		signal: context.abortSignal,
-		telemetryContext: getTelemetryContext(context),
+		telemetry: context.telemetry,
 		onPayload:
 			config.beforePayload === undefined
 				? undefined
@@ -103,16 +104,32 @@ export async function consumeAssistantStream(
 		| ((message: SettledAssistantMessage, context: Context) => Promise<SettledAssistantMessage>)
 		| undefined,
 	context: Context,
+	cancelRequest?: (reason: unknown) => void,
 ): Promise<SettledAssistantMessage> {
+	const observe = async (invoke: () => void | Promise<void>) => {
+		try {
+			await invoke();
+		} catch (error) {
+			if (cancelRequest !== undefined) {
+				try {
+					cancelRequest(error);
+					await stream.result();
+				} catch {
+					// Cleanup must preserve the observer's original failure.
+				}
+			}
+			throw error;
+		}
+	};
 	let started = false;
 	for await (const event of stream) {
 		if (event.type === "start") {
 			if (started) throw new Error("Assistant message stream emitted more than one start event");
 			started = true;
-			await observer.start({ ...event.partial }, event, context);
+			await observe(() => observer.start({ ...event.partial }, event, context));
 		} else if (isUpdateEvent(event)) {
 			if (!started) throw new Error(`Assistant message stream emitted ${event.type} before start`);
-			await observer.update({ ...event.partial }, event, context);
+			await observe(() => observer.update({ ...event.partial }, event, context));
 		} else if (event.type === "done" && !started) {
 			throw new Error("Assistant message stream emitted done before start");
 		}
@@ -138,6 +155,14 @@ export async function streamHarnessAssistant(
 	config: HarnessAssistantStreamConfig,
 	context: Context,
 ): Promise<SettledAssistantMessage> {
+	return withModelTelemetry(context, (requestContext) => streamAssistant(messages, config, requestContext));
+}
+
+async function streamAssistant(
+	messages: AgentMessage[],
+	config: HarnessAssistantStreamConfig,
+	context: Context,
+): Promise<SettledAssistantMessage> {
 	let requestContext = { messages: messages.slice(), systemPrompt: config.systemPrompt };
 	if (config.transformContext) {
 		requestContext = await config.transformContext(requestContext, context);
@@ -151,6 +176,8 @@ export async function streamHarnessAssistant(
 	};
 
 	let metadata: AssistantResponseMetadata = {};
+	const controller = new AbortController();
+	const admitted = withAbortSignal(controller.signal, context);
 	const stream = await config.request(
 		aiContext,
 		createRequestOptions(
@@ -158,9 +185,9 @@ export async function streamHarnessAssistant(
 			(nextMetadata) => {
 				metadata = nextMetadata;
 			},
-			context,
+			admitted,
 		),
-		context,
+		admitted,
 	);
 
 	const afterResponse = config.afterResponse;
@@ -171,5 +198,6 @@ export async function streamHarnessAssistant(
 			? undefined
 			: (message, afterContext) => afterResponse(message, metadata, afterContext),
 		context,
+		(error) => controller.abort(error),
 	);
 }

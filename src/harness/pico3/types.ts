@@ -18,7 +18,9 @@ import type {
 	ImageContent,
 	Message as ModelMessage,
 	Model as ModelOf,
+	SystemMessage as ModelSystemMessage,
 	TextContent,
+	Tool,
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
@@ -77,7 +79,11 @@ export interface SystemMessage {
 	toolsRemoved?: { name: string }[];
 	timestamp: number;
 }
-export type Message = ModelMessage | SystemMessage;
+// Tool schemas are JSON objects at the durable boundary, even though pi-ai accepts any object in memory.
+type DurableModelMessage =
+	| Exclude<ModelMessage, ModelSystemMessage>
+	| (Omit<ModelSystemMessage, "toolsAdded"> & { toolsAdded?: Tool<JsonObject>[] });
+export type Message = DurableModelMessage | SystemMessage;
 export type StoredMessage = Stored<Message>;
 export type Model = ModelOf<Api>;
 

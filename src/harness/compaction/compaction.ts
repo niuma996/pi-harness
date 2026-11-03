@@ -13,7 +13,8 @@ import {
 	uuidv7,
 } from "@earendil-works/pi-ai";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
-import { type Context, getTelemetryContext } from "../context.ts";
+import type { Context } from "../context.ts";
+import { withModelTelemetry } from "../execution/model-telemetry.ts";
 import { convertToLlm, createBranchSummaryMessage, createCompactionSummaryMessage } from "../messages.ts";
 import { buildContextEntries, sessionEntryToContextMessages } from "../session/context.ts";
 import type { CompactionEntry, Entry, JsonValue } from "../session/types.ts";
@@ -118,7 +119,7 @@ export function createSummaryRequestOptions(options: SimpleStreamOptions, contex
 	return {
 		...options,
 		signal: context.abortSignal,
-		telemetryContext: getTelemetryContext(context),
+		telemetry: context.telemetry,
 		cacheRetention: "none",
 		sessionId: options.sessionId ?? uuidv7(),
 	};
@@ -134,13 +135,15 @@ export async function completeSimpleWithRetries(
 	context: Context,
 ): Promise<AssistantMessage> {
 	// Summaries are standalone requests, so isolate routing and avoid cache writes that cannot be reused.
-	const requestOptions = createSummaryRequestOptions(options, context);
-	return retryAssistantCall(
-		() => models.completeSimple(model, aiContext, requestOptions),
-		retry,
-		requestOptions.signal,
-		callbacks,
-	);
+	return withModelTelemetry(context, (requestContext) => {
+		const requestOptions = createSummaryRequestOptions(options, requestContext);
+		return retryAssistantCall(
+			() => models.completeSimple(model, aiContext, requestOptions),
+			retry,
+			requestOptions.signal,
+			callbacks,
+		);
+	});
 }
 
 /** Compaction thresholds and retention settings. */
@@ -588,10 +591,12 @@ export async function generateSummaryWithRequest(
 			? { maxTokens, reasoning: thinkingLevel }
 			: { maxTokens };
 
-	const response = await request(
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		createSummaryRequestOptions(completionOptions, context),
-		context,
+	const response = await withModelTelemetry(context, (requestContext) =>
+		request(
+			{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+			createSummaryRequestOptions(completionOptions, requestContext),
+			requestContext,
+		),
 	);
 	if (response.stopReason === "aborted") {
 		return err(new CompactionError("aborted", response.errorMessage || "Summarization aborted"));
@@ -841,10 +846,12 @@ async function generateTurnPrefixSummary(
 		model.reasoning && thinkingLevel && thinkingLevel !== "off"
 			? { maxTokens, reasoning: thinkingLevel }
 			: { maxTokens };
-	const response = await request(
-		{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-		createSummaryRequestOptions(completionOptions, context),
-		context,
+	const response = await withModelTelemetry(context, (requestContext) =>
+		request(
+			{ systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
+			createSummaryRequestOptions(completionOptions, requestContext),
+			requestContext,
+		),
 	);
 	if (response.stopReason === "aborted") {
 		return err(new CompactionError("aborted", response.errorMessage || "Turn prefix summarization aborted"));

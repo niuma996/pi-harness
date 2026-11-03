@@ -54,6 +54,32 @@ No declared span events.
 
 Schema version: 1
 
+### `pi.harness.model_request`
+
+Scoped model-request parent when the caller supplies a recorder instead of an active span
+
+- Parents: root or caller-owned external span
+- Default status: `ok`
+- Error when: The request boundary throws
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| _none_ | | | | | |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| _none_ | | | | |
+
+#### Events
+
+No declared span events.
+
 ### `pi.harness.run`
 
 One admitted in-process run invocation

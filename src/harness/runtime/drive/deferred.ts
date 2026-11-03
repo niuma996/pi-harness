@@ -1,6 +1,7 @@
 import type { Api, DeferredHandle, Model } from "@earendil-works/pi-ai";
-import { type Context, getTelemetryContext, withAbortSignal } from "../../context.ts";
+import { type Context, withAbortSignal } from "../../context.ts";
 import { consumeAssistantStream } from "../../execution/assistant.ts";
+import { withModelTelemetry } from "../../execution/model-telemetry.ts";
 import { applyStreamOptionsPatch } from "../../hooks.ts";
 import { SessionInvariantError } from "../../session/session.ts";
 import {
@@ -191,41 +192,45 @@ async function performDeferredPoll<TContext extends object | undefined>(
 ): Promise<SettledAssistantMessage> {
 	const response = openAssistantResponse(lane, drive, intent.responseEntryId, recovery);
 	let metadata: { status?: number; headers?: Record<string, string> } = {};
-	const admitted = withAbortSignal(drive.gate.signal, drive.context);
-	const stream = drive.gate.admit(() =>
-		lane.models.streamDeferred(prepared.model, prepared.source, {
-			wait: 0,
-			signal: admitted.abortSignal,
-			telemetryContext: getTelemetryContext(admitted),
-			timeoutMs: prepared.streamOptions.timeoutMs,
-			maxRetries: prepared.streamOptions.maxRetries,
-			maxRetryDelayMs: prepared.streamOptions.maxRetryDelayMs,
-			headers: prepared.streamOptions.headers,
-			onPayload: async (payload, requestModel) => {
-				const result = await lane.hooks.runWithGate(
-					"before_payload",
-					{ lane: lane.name, runId: drive.operationId, model: requestModel, payload },
-					drive.gate,
-					drive.context,
-				);
-				return result?.payload;
-			},
-			onResponse: (response) => {
-				metadata = { status: response.status, headers: response.headers };
-			},
-		}),
-	);
-
-	try {
-		return await consumeAssistantStream(
-			stream,
-			response.observer,
-			(message, context) => response.afterResponse(message, metadata, context),
-			drive.context,
+	return withModelTelemetry(drive.context, async (requestContext) => {
+		const controller = new AbortController();
+		const admitted = withAbortSignal(controller.signal, withAbortSignal(drive.gate.signal, requestContext));
+		const stream = drive.gate.admit(() =>
+			lane.models.streamDeferred(prepared.model, prepared.source, {
+				wait: 0,
+				signal: admitted.abortSignal,
+				telemetry: admitted.telemetry,
+				timeoutMs: prepared.streamOptions.timeoutMs,
+				maxRetries: prepared.streamOptions.maxRetries,
+				maxRetryDelayMs: prepared.streamOptions.maxRetryDelayMs,
+				headers: prepared.streamOptions.headers,
+				onPayload: async (payload, requestModel) => {
+					const result = await lane.hooks.runWithGate(
+						"before_payload",
+						{ lane: lane.name, runId: drive.operationId, model: requestModel, payload },
+						drive.gate,
+						requestContext,
+					);
+					return result?.payload;
+				},
+				onResponse: (response) => {
+					metadata = { status: response.status, headers: response.headers };
+				},
+			}),
 		);
-	} finally {
-		await response.close();
-	}
+
+		try {
+			return await consumeAssistantStream(
+				stream,
+				response.observer,
+				(message, context) => response.afterResponse(message, metadata, context),
+				requestContext,
+				(error) => controller.abort(error),
+			);
+		} finally {
+			await response.close();
+		}
+	});
 }
 
 async function pollDeferred<TContext extends object | undefined>(
