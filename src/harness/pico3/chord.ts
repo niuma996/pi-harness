@@ -1,11 +1,6 @@
-import type {
-	Context,
-	Draft,
-	MutableReplicatedState,
-	ReplicatedState,
-} from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import { type Draft, type Op, type Path, type Seg, track } from "@earendil-works/chord/delta";
 import { defineService } from "../../shims/define-service.ts";
-import type { Op, Path, Seg } from "@earendil-works/chord/delta";
 import type { ConversationHandle, Harness } from "./harness.ts";
 import type {
 	ConversationSpec,
@@ -25,8 +20,97 @@ export type PublishedConversationView = ConversationView & {
 	commit: { events: ViewEvent[] };
 };
 
-export interface PicoConversationService {
-	readonly view: ReplicatedState<PublishedConversationView>;
+/** Readable host-owned publication; observation methods belong to the supplied adapter. */
+export interface ConversationViewSource {
+	readonly value: PublishedConversationView | undefined;
+}
+
+/**
+ * A host-owned publisher. change must synchronously commit the entire mutation atomically,
+ * retain previous snapshots, and discard the mutation if its callback throws.
+ */
+export interface ConversationViewPublisher extends ConversationViewSource {
+	readonly value: PublishedConversationView;
+	change(context: Context, mutate: (draft: Draft<PublishedConversationView>) => void): void;
+}
+
+export interface ConversationViewDelivery {
+	readonly kind: "update";
+	readonly sequence: number;
+}
+
+export type ConversationViewListener = (
+	value: PublishedConversationView,
+	context: Context,
+	delivery: ConversationViewDelivery,
+) => void | Promise<void>;
+
+export interface ObservableConversationViewPublisher extends ConversationViewPublisher {
+	/** Observe future revisions; the initial snapshot is available through value. Async listeners are not awaited. */
+	subscribe(listener: ConversationViewListener): () => void;
+}
+
+/** Atomic local publication over Chord's delta tracker; subscriber failures cannot roll back a committed revision. */
+export function createConversationViewPublisher(
+	initial: PublishedConversationView,
+	options: { onError?: (error: unknown) => void } = {},
+): ObservableConversationViewPublisher {
+	const tracker = track(structuredClone(initial));
+	const listeners = new Set<ConversationViewListener>();
+	const queue: {
+		value: PublishedConversationView;
+		context: Context;
+		delivery: ConversationViewDelivery;
+		listeners: ConversationViewListener[];
+	}[] = [];
+	let sequence = 0;
+	let mutating = false;
+	let delivering = false;
+	const report = (error: unknown) => {
+		try { options.onError?.(error); } catch {}
+	};
+	return {
+		get value() { return tracker.value; },
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => { listeners.delete(listener); };
+		},
+		change(context, mutate) {
+			if (mutating) throw new Error("Cannot publish during a view mutation");
+			const change = tracker.beginChange();
+			mutating = true;
+			try {
+				mutate(change.state);
+				tracker.adopt(change.prepare());
+			} catch (error) {
+				change.abort();
+				throw error;
+			} finally {
+				mutating = false;
+			}
+			queue.push({ value: tracker.value, context, delivery: { kind: "update", sequence: ++sequence }, listeners: [...listeners] });
+			if (delivering) return;
+			delivering = true;
+			try {
+				while (queue.length > 0) {
+					const frame = queue.shift()!;
+					for (const listener of frame.listeners) {
+						if (!listeners.has(listener)) continue;
+						try {
+							const result = listener(frame.value, frame.context, frame.delivery);
+							if (result) void Promise.resolve(result).catch(report);
+						} catch (error) { report(error); }
+					}
+				}
+			} finally {
+				delivering = false;
+			}
+		},
+	};
+}
+
+export interface PicoConversationService<TView extends ConversationViewSource = ConversationViewSource> {
+	readonly view: TView;
 	send(input: SendInput, ctx: Context): Promise<Id>;
 	write(entry: NewEntry, ctx: Context): Promise<Id>;
 	inputAbort(id: Id, ctx: Context): Promise<"aborted" | "already_placed" | "not_found">;
@@ -42,11 +126,14 @@ export interface PicoConversationService {
 export const PicoHarnessService = defineService<Harness>("pi.harness", { local: true });
 export const PicoConversationService = defineService<PicoConversationService>("pi.conversation");
 
-export function createPicoConversationService<Cfg extends object>(
+export function createPicoConversationService<
+	Cfg extends object,
+	TView extends ConversationViewSource = ConversationViewSource,
+>(
 	harness: Pick<Harness, "abortInput" | "entries">,
 	conversation: ConversationHandle<Cfg>,
-	view: ReplicatedState<PublishedConversationView>,
-): PicoConversationService {
+	view: TView,
+): PicoConversationService<TView> {
 	return {
 		view,
 		send: (input, ctx) => conversation.send(input, ctx).then((handle) => handle.id),
@@ -61,8 +148,8 @@ export function createPicoConversationService<Cfg extends object>(
 	};
 }
 
-export interface ChordViewBridge {
-	readonly view: MutableReplicatedState<PublishedConversationView>;
+export interface ChordViewBridge<TView extends ConversationViewPublisher = ConversationViewPublisher> {
+	readonly view: TView;
 	readonly closed: boolean;
 	close(): void;
 }
@@ -78,23 +165,23 @@ export interface ChordViewBridgeOptions {
  * The raw listener only enqueues. Applying ops and publishing happen together,
  * off the Session line, with no await between them.
  */
-export async function attachChordView(
+export async function attachChordView<TView extends ConversationViewPublisher>(
 	conversation: Pick<ConversationHandle, "watch">,
-	createState: (initial: PublishedConversationView) => MutableReplicatedState<PublishedConversationView>,
+	createState: (initial: PublishedConversationView) => TView,
 	ctx: Context,
 	opts: ChordViewBridgeOptions = {},
-): Promise<ChordViewBridge> {
+): Promise<ChordViewBridge<TView>> {
 	const watch = await conversation.watch(ctx);
 	const view = createState({ ...structuredClone(watch.view), commit: { events: [] } });
 	return bridgeWatch(watch, view, ctx, opts);
 }
 
-function bridgeWatch(
+function bridgeWatch<TView extends ConversationViewPublisher>(
 	watch: Watch,
-	view: MutableReplicatedState<PublishedConversationView>,
+	view: TView,
 	ctx: Context,
 	opts: ChordViewBridgeOptions,
-): ChordViewBridge {
+): ChordViewBridge<TView> {
 	const capacity = opts.capacity ?? WATCH_CAPACITY;
 	if (!Number.isSafeInteger(capacity) || capacity < 1)
 		throw new RangeError("Chord view queue capacity must be positive");

@@ -1,4 +1,4 @@
-import type { JsonRepresentation } from "@earendil-works/chord";
+import type { JsonRepresentation } from "@earendil-works/chord/json";
 import { expectTypeOf, it } from "vitest";
 import type { JsonValue, QueuedInput, Stored, StoredMessage } from "../../../src/harness/pico3/types.ts";
 

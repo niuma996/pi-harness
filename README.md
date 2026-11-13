@@ -91,13 +91,13 @@ over is an import rewrite, not a redesign.
 
 ## Dependencies
 
-The pi base packages are **peer** dependencies, pinned to the latest line:
+The pi base packages are **peer** dependencies, pinned to the exact tested set:
 
 ```jsonc
 "peerDependencies": {
-  "@earendil-works/pi-ai": "^1.5.0",
-  "@earendil-works/chord": "^1.5.0",
-  "@earendil-works/pi-telemetry": "^1.5.0"
+  "@earendil-works/pi-ai": "1.5.2",
+  "@earendil-works/chord": "1.5.2",
+  "@earendil-works/pi-telemetry": "1.5.2"
 }
 ```
 
@@ -105,15 +105,56 @@ There is deliberately **no** dependency on `@earendil-works/pi-agent-core` (any 
 has no harness) and none on `@earendil-works/pi-durable` (a separate migration track).
 
 What is frozen here is the **harness/session API and the JSONL format**. The **model stack
-tracks upstream**, so new models, auth fixes and provider fixes arrive by bumping the peers.
+tracks upstream through tested harness releases**. Upgrade this package together with the Pi
+peer versions it declares to receive model, auth and provider fixes. Other versions, including
+newer patches such as 1.5.3, do not satisfy the exact peer requirements; npm can reject their
+installation with `ERESOLVE`. This deliberately blocks unverified upstream API changes.
 
-Version 0.1.1 requires pi-ai, chord and pi-telemetry 1.5 or later. Upgrade all three peers together.
+Version 0.2.0 requires pi-ai, chord and pi-telemetry 1.5.2. Keep the three peers on the tested 1.5.2 set.
 `withTelemetryContext()` still accepts a recorder or an active span. Active spans interoperate
 with chord's `withTelemetry()`; recorder-backed model calls create a scoped
 `pi.harness.model_request` parent that remains open through response consumption.
 Custom implementations of chord `Context` must now expose `telemetry`. In experimental pico3,
 persisted system-message tool parameters must be JSON objects; `Stored<T>` still uses chord's
-`JsonRepresentation<T>` without redefining its projection rules. Existing JSONL files need no migration.
+`JsonRepresentation<T>` without redefining its projection rules. Existing JSONL files need no migration. The experimental `experimental/pico3` Chord view bridge now accepts a host-owned synchronous publisher; it no longer exposes Chord v1 `ReplicatedState` types.
+
+## Experimental Pico3 view migration
+
+Chord 1.5.1 removed its v1 `replicatedState()` API. `attachChordView()` still accepts a
+factory, but its result now implements the exported `ConversationViewPublisher` contract:
+`value` is the current `PublishedConversationView`, and `change(context, mutate)` atomically
+publishes one synchronous `Draft<PublishedConversationView>` mutation. The publisher must
+preserve previous snapshots and discard a mutation whose callback throws.
+
+The bridge retains the factory result's concrete type, including host-specific subscription
+methods. `createPicoConversationService()` likewise retains the supplied view type. Explicit
+`ChordViewBridge` / `PicoConversationService` annotations expose only the minimal view contract;
+pass the publisher type as their generic argument when consumers need its observation methods.
+Closing the bridge stops its Pico watch; the host still owns the publisher's lifetime.
+
+This is a migration of the experimental publication boundary, not a built-in Chord v2 host
+adapter. Use the built-in atomic publisher with the existing factory argument:
+
+```ts
+import { attachChordView, createConversationViewPublisher } from "@taco-ai/pi-harness/experimental/pico3";
+
+const bridge = await attachChordView(conversation, createConversationViewPublisher, context);
+const unsubscribe = bridge.view.subscribe((view, context, delivery) => {
+  // Observe future revisions; the current snapshot is bridge.view.value.
+});
+```
+
+`createConversationViewPublisher()` rolls back failed mutations and keeps earlier snapshots
+intact. Subscriptions observe future updates in sequence; callbacks start synchronously,
+async results are not awaited, and listener failures go to the optional `onError` callback.
+The bridge trusts custom publishers to meet the same mutation contract: a publisher that
+leaves partial state after throwing can leave an inconsistent view when the bridge closes.
+
+A default-typed `PicoConversationService.view.value` is now
+`PublishedConversationView | undefined`; check it before accessing entries, or retain the
+concrete publisher type through inference or the generic parameter. See the
+[0.2.0 release notes](./docs/releases/0.2.0.md). The main `AgentHarness` and existing JSONL
+files need no API or format migration.
 
 ## Vendored shims
 
@@ -152,12 +193,22 @@ pnpm run test:session:conformance
 ```bash
 pnpm install
 pnpm build                              # tsc -p tsconfig.build.json
-pnpm test                               # full suite (878 tests)
-pnpm test:harness                       # harness suite (788 tests)
+pnpm test                               # full suite (900 passed, 1 skipped)
+pnpm test:harness                       # harness suite (810 passed, 1 skipped)
 pnpm run test:session:conformance       # JSONL conformance gate
 pnpm docs:telemetry                     # regenerate docs/telemetry-schema.md
 pnpm docs:telemetry:check               # fail if the generated doc is stale
+pnpm check:package                      # pack and consume every public export
 ```
+
+`pnpm check:package` first rebuilds `dist/`, then installs the tarball into an isolated consumer and checks all public
+entry points with `skipLibCheck: false`, then runs a faux-model request. The strict fixture
+also installs `@modelcontextprotocol/sdk@1.30.0` and includes TypeScript's `DOM` library:
+`pi-ai`'s upstream `@google/genai` declarations reference that optional SDK and browser
+types unconditionally. Consumers checking dependency declarations need those type prerequisites;
+a Node-only type environment with only the documented Pi peers still encounters upstream
+GenAI declaration errors. The fixture supplies a type-checking environment, not an additional
+runtime requirement of this harness.
 
 Tests resolve `@earendil-works/pi-ai`, `chord` and `pi-telemetry` from `node_modules` — the
 published 1.x builds, not sibling monorepo source. That is the point of the package: the suite

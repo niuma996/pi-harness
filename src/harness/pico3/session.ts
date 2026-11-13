@@ -1,4 +1,5 @@
-import { type Context, isJsonValue } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import { isJsonValue } from "@earendil-works/chord/json";
 import { createContextKey, withContextValue, withoutAbortSignal } from "@earendil-works/chord/context";
 import { isBase, type Op } from "@earendil-works/chord/delta";
 import { deriveContext } from "./context.ts";

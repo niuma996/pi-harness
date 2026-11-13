@@ -10,11 +10,17 @@ export { Bounded } from "./bounded.ts";
 export type {
 	ChordViewBridge,
 	ChordViewBridgeOptions,
+	ConversationViewDelivery,
+	ConversationViewListener,
+	ConversationViewPublisher,
+	ObservableConversationViewPublisher,
+	ConversationViewSource,
 	PublishedConversationView,
 } from "./chord.ts";
 export {
 	attachChordView,
 	createPicoConversationService,
+	createConversationViewPublisher,
 	PicoConversationService,
 	PicoHarnessService,
 } from "./chord.ts";

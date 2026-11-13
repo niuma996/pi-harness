@@ -37,26 +37,4 @@ jobs:
 
       - run: pnpm test
 
-      - name: Verify published package contents
-        run: |
-          node -e '
-            const { execFileSync } = require("node:child_process");
-            const [pack] = JSON.parse(
-              execFileSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" }),
-            );
-            const files = new Set(pack.files.map((file) => file.path));
-            const required = [
-              "docs/telemetry-schema.md",
-              "LICENSE",
-              "LICENSE.upstream",
-              "README.md",
-              "README.zh-CN.md",
-            ];
-            for (const path of required) {
-              if (!files.has(path)) {
-                console.error(`Package is missing ${path}`);
-                process.exit(1);
-              }
-            }
-            console.log(`Package contents verified (${files.size} files).`);
-          '
+      - run: pnpm check:package

@@ -88,28 +88,62 @@ prompt templates 以及整个 `./harness/*` 接口，改由 `pi-durable` 取代�
 
 ## 依赖
 
-pi 基础包是 **peer** 依赖，固定在最新版本线上：
+pi 基础包是 **peer** 依赖，精确固定为经过验证的版本组合：
 
 ```jsonc
 "peerDependencies": {
-  "@earendil-works/pi-ai": "^1.5.0",
-  "@earendil-works/chord": "^1.5.0",
-  "@earendil-works/pi-telemetry": "^1.5.0"
+  "@earendil-works/pi-ai": "1.5.2",
+  "@earendil-works/chord": "1.5.2",
+  "@earendil-works/pi-telemetry": "1.5.2"
 }
 ```
 
-0.1.1 版本要求 pi-ai、chord 和 pi-telemetry 至少为 1.5，请同步升级三个 peer。
+0.2.0 版本要求 pi-ai、chord 和 pi-telemetry 为经过验证的 1.5.2，请将三个 peer 保持在同一组版本。
 `withTelemetryContext()` 继续接受 recorder 或活动 span；活动 span 可与 chord 的
 `withTelemetry()` 互通。使用 recorder 发起模型调用时，会创建覆盖响应消费阶段的
 `pi.harness.model_request` 父 span。自实现 chord `Context` 的调用方需提供 `telemetry` 属性。
 实验性 pico3 的持久化 system message 工具参数必须为 JSON 对象；`Stored<T>` 仍使用 chord
-原有的 `JsonRepresentation<T>` 投影。已有 JSONL 文件无需迁移。
+原有的 `JsonRepresentation<T>` 投影。已有 JSONL 文件无需迁移。实验性 `experimental/pico3` 的 Chord 视图桥现在接受宿主提供的同步发布器，不再暴露 Chord v1 的 `ReplicatedState` 类型。
 
 刻意**不**依赖 `@earendil-works/pi-agent-core`（任何版本都不依赖 —— 1.x 已无 harness），
 也**不**依赖 `@earendil-works/pi-durable`（那是另一条迁移路线）。
 
-这里冻结的是 **harness/session API 与 JSONL 格式**。**模型栈跟随上游**，所以新模型、
-鉴权修复和 provider 修复通过升级 peer 即可获得。
+这里冻结的是 **harness/session API 与 JSONL 格式**。**模型栈通过经过验证的 harness 发版跟随上游**；
+请同步升级本包和它声明的 Pi peer 版本，获取模型、鉴权及 provider 修复。其他版本（包括
+1.5.3 这样的新补丁）不满足精确 peer 要求，npm 可能以 `ERESOLVE` 拒绝安装。
+这是有意阻挡未经验证的上游 API 变化。
+
+## 实验性 Pico3 视图迁移
+
+Chord 1.5.1 移除了 v1 的 `replicatedState()` API。`attachChordView()` 仍接受工厂函数，
+但返回值现在需实现导出的 `ConversationViewPublisher`：`value` 为当前
+`PublishedConversationView`，`change(context, mutate)` 原子发布一次同步的
+`Draft<PublishedConversationView>` 修改。发布器应保留旧快照，并在修改回调抛错时丢弃该次修改。
+
+视图桥会保留工厂返回值的具体类型，包括宿主自己的订阅方法；
+`createPicoConversationService()` 同样保留传入视图的类型。显式标注
+`ChordViewBridge` / `PicoConversationService` 时只暴露最小视图契约；需要订阅方法时，
+请将发布器类型作为泛型参数传入。关闭桥会停止 Pico watch，发布器的生命周期仍由宿主管理。
+
+此改动调整的是实验性发布边界，未内置 Chord v2 host 适配器。可以直接使用内置原子发布器：
+
+```ts
+import { attachChordView, createConversationViewPublisher } from "@taco-ai/pi-harness/experimental/pico3";
+
+const bridge = await attachChordView(conversation, createConversationViewPublisher, context);
+const unsubscribe = bridge.view.subscribe((view, context, delivery) => {
+  // 观察后续更新；当前快照为 bridge.view.value。
+});
+```
+
+`createConversationViewPublisher()` 会回滚失败修改并保留旧快照。订阅按序接收后续更新，
+回调同步启动，异步结果不阻塞发布；监听器失败交给可选的 `onError` 回调。
+桥接层信任自定义发布器实现同样的原子契约：如果修改抛错后仍保留部分状态，
+桥关闭时可能留下不一致的视图。
+
+默认类型的 `PicoConversationService.view.value` 现在为 `PublishedConversationView | undefined`；
+读取 entries 前需要判空，或通过推断/泛型参数保留具体发布器类型。参见
+[0.2.0 发版说明](./docs/releases/0.2.0.md)。主 `AgentHarness` API 和已有 JSONL 文件均无需迁移。
 
 ## 内置 shim
 
@@ -145,12 +179,20 @@ pnpm run test:session:conformance
 ```bash
 pnpm install
 pnpm build                              # tsc -p tsconfig.build.json
-pnpm test                               # 全量测试（878 个）
-pnpm test:harness                       # harness 测试（788 个）
+pnpm test                               # 全量测试（900 通过，1 跳过）
+pnpm test:harness                       # harness 测试（810 通过，1 跳过）
 pnpm run test:session:conformance       # JSONL 一致性校验
 pnpm docs:telemetry                     # 重新生成 docs/telemetry-schema.md
 pnpm docs:telemetry:check               # 检查生成文档是否已过期
+pnpm check:package                      # 打包并消费所有公开入口
 ```
+
+`pnpm check:package` 先重新构建 `dist/`，再在隔离消费者中安装 tarball，以 `skipLibCheck: false` 检查所有公开入口，
+并执行一次 faux 模型请求。严格检查环境额外安装 `@modelcontextprotocol/sdk@1.30.0`，
+同时启用 TypeScript 的 `DOM` 类型库：`pi-ai` 上游的 `@google/genai` 声明无条件引用了
+这些可选 SDK 和浏览器类型。需要检查依赖声明的消费者也需提供这些类型前提；仅安装上述 Pi
+peer 的纯 Node 类型环境仍会遇到上游 GenAI 声明错误。这些是严格类型检查的环境要求，
+不是 harness 新增的运行时要求。
 
 测试从 `node_modules` 解析 `@earendil-works/pi-ai`、`chord` 和 `pi-telemetry` ——
 用的是已发布的 1.x 构建，而不是同仓库 monorepo 的源码。这正是本包的要点：

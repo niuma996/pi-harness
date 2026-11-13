@@ -1,6 +1,6 @@
 {
 	"name": "@taco-ai/pi-harness",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"description": "AgentHarness extracted from @earendil-works/pi-agent-core@0.99.2, kept compatible with the latest pi base packages (pi-ai/chord/pi-telemetry 1.x)",
 	"author": "NiumAgents <niuma1024@outlook.com>",
 	"type": "module",
@@ -59,12 +59,13 @@
 		"test:harness": "vitest --run --config vitest.harness.config.ts",
 		"test:session:conformance": "vitest --run --config vitest.harness.config.ts test/harness/memory-conformance.test.ts",
 		"typecheck": "tsc --noEmit",
-		"prepublishOnly": "npm run clean && npm run build && npm test"
+		"prepublishOnly": "npm run clean && npm run build && npm test",
+		"check:package": "node scripts/check-package.mjs"
 	},
 	"peerDependencies": {
-		"@earendil-works/chord": "^1.5.0",
-		"@earendil-works/pi-ai": "^1.5.0",
-		"@earendil-works/pi-telemetry": "^1.5.0"
+		"@earendil-works/chord": "1.5.2",
+		"@earendil-works/pi-ai": "1.5.2",
+		"@earendil-works/pi-telemetry": "1.5.2"
 	},
 	"dependencies": {
 		"diff": "8.0.4",

@@ -77,6 +77,8 @@ jobs:
 
       - run: pnpm test
 
+      - run: pnpm check:package
+
       - name: Publish to npm
         if: github.event_name == 'push' || inputs.run_publish
         env:
