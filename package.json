@@ -1,6 +1,6 @@
 {
 	"name": "@taco-ai/pi-harness",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "AgentHarness extracted from @earendil-works/pi-agent-core@0.99.2, kept compatible with the latest pi base packages (pi-ai/chord/pi-telemetry 1.x)",
 	"author": "NiumAgents <niuma1024@outlook.com>",
 	"type": "module",
